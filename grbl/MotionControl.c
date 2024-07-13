@@ -98,6 +98,33 @@ void MC_SyncBacklashPosition(void)
 }
 
 
+void MC_WaitPlannerFree(void)
+{
+    // If the buffer is full: good! That means we are well ahead of the robot.
+    // Remain in this loop until there is room in the buffer.
+    do
+    {
+        Protocol_ExecuteRealtime(); // Check for any run-time commands
+
+        if(sys.abort)
+        {
+            // Bail, if system abort.
+            return;
+        }
+
+        if(Planner_CheckBufferFull())
+        {
+            // Auto-cycle start when buffer is full.
+            Protocol_AutoCycleStart();
+        }
+        else
+        {
+            break;
+        }
+    } while(1);
+}
+
+
 // Execute linear motion in absolute millimeter coordinates. Feed rate given in millimeters/second
 // unless invert_feed_rate is true. Then the feed_rate means that the motion should be completed in
 // (1 minute)/feed_rate time.
@@ -148,28 +175,7 @@ void MC_Line(const float *target, const Planner_LineData_t *pl_data)
     // parser and planner are separate from the system machine positions, this is doable.
 
 
-    // If the buffer is full: good! That means we are well ahead of the robot.
-    // Remain in this loop until there is room in the buffer.
-    do
-    {
-        Protocol_ExecuteRealtime(); // Check for any run-time commands
-
-        if(sys.abort)
-        {
-            // Bail, if system abort.
-            return;
-        }
-
-        if(Planner_CheckBufferFull())
-        {
-            // Auto-cycle start when buffer is full.
-            Protocol_AutoCycleStart();
-        }
-        else
-        {
-            break;
-        }
-    } while(1);
+    MC_WaitPlannerFree();
 
     if (BIT_IS_TRUE(settings.flags_ext, BITFLAG_ENABLE_BACKLASH_COMP))
     {
@@ -219,7 +225,7 @@ void MC_Line(const float *target, const Planner_LineData_t *pl_data)
         {
             float vec_len = sqrtf(powf(delta_prev[X_AXIS], 2.0) + powf(delta_prev[Y_AXIS], 2.0) + powf(delta_prev[Z_AXIS], 2.0));
 
-            pl_data_new.feed_rate *= 1.1;
+            pl_data_new.feed_rate *= 1.2;
 
             // Normalize target vector and reduce to a length of 0.1 and add it to previous target
             for (uint8_t i = 0; i < N_LINEAR_AXIS; i++)
@@ -232,6 +238,7 @@ void MC_Line(const float *target, const Planner_LineData_t *pl_data)
             {
                 Planner_BufferLine(vec_norm, &pl_data_new);
                 pl_data_new.backlash_motion = 0;
+                pl_data_new.feed_rate = pl_data->feed_rate;
             }
         }
 
@@ -239,26 +246,7 @@ void MC_Line(const float *target, const Planner_LineData_t *pl_data)
         memcpy(target_prev, target, N_AXIS*sizeof(float));
 
         // Backlash move needs a slot in planner buffer, so we have to check again, if planner is free
-        do
-        {
-            Protocol_ExecuteRealtime(); // Check for any run-time commands
-
-            if (sys.abort)
-            {
-                // Bail, if system abort.
-                return;
-            }
-
-            if (Planner_CheckBufferFull())
-            {
-                // Auto-cycle start when buffer is full.
-                Protocol_AutoCycleStart();
-            }
-            else
-            {
-                break;
-            }
-        } while(1);
+        MC_WaitPlannerFree();
     }
 
     if(pl_data_new.backlash_motion != 0)
